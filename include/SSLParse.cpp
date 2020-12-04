@@ -229,12 +229,13 @@ void packageSSLInfoByX509(SSLInfo& sslInfo,X509* x509){
 //    cout<<sslInfo.notAfter<<endl;
 }
 
+
+
+
 //将二进制字符串转换为base64并添加证书头尾
 inline string toBase64(string& str){
     //将字符串转换为base64
-    string base64_str = base64_encode(
-            reinterpret_cast<const unsigned char*>
-            (str.c_str()),str.length());
+    string base64_str = base64_encode(reinterpret_cast<const unsigned char*>(str.c_str()),str.length());
     //给base64字符串添加头尾
     string result = "-----BEGIN CERTIFICATE-----\n";
     result.append(base64_str.append("\n-----END CERTIFICATE-----"));
@@ -260,36 +261,24 @@ void SSLParse::loadRootCerts(){
             string str = "";
             string rootCertPaths = rootCertPath;
             rootCertPaths.append(entry->d_name);
-            fstream fs(rootCertPaths, ios::in | ios::binary);
-            if (!fs.bad())
-            {
-                fs.open(rootCertPaths, ios::in | ios::binary);
-                ostringstream oss;
-                oss << fs.rdbuf();
-                str = oss.str();
-                fs.close();
-            } else{
+            FILE *rootCerFile = NULL;
+            rootCerFile = fopen(rootCertPaths.c_str(),"rb");
+            X509 * rootCert = NULL;
+            if(rootCerFile!=NULL){
+                rootCert = d2i_X509_fp(rootCerFile,NULL);
+            }else{
                 //LOG(ERROR)<<rootCertPaths<<" open fail!"<<endl;
                 cout<<rootCertPaths<<" open fail!"<<endl;
                 continue;
             }
-            //分配BIO缓冲区
-            BIO *bio_mem = BIO_new(BIO_s_mem());
-            //将证书base64内容放入BIO的缓冲区
-            BIO_puts(bio_mem,toBase64(str).c_str());
-            //将BIO缓冲区的内容转换为X509对象
-            X509 * rootCert = PEM_read_bio_X509(bio_mem, NULL, NULL, NULL);
             if(rootCert != NULL){
                 //LOG(INFO)<<entry->d_name<<endl;
-                cout<<entry->d_name<<endl;
+                //cout<<entry->d_name<<endl;
                 //将被信任的证书加入信任链
                 X509_STORE_add_cert(certChain,rootCert);
             }
             //释放X509对象空间
             X509_free(rootCert);
-            //释放BIO缓冲区
-            BIO_free(bio_mem);
-            bio_mem = NULL;
         }
     }
     //关闭目录
@@ -306,7 +295,13 @@ SSLParse::SSLParse() {
     loadRootCerts();
     //为证书链上下文分配内存
     ctx = X509_STORE_CTX_new();
+    //初始化合法证书链
+    legalCertChain = X509_STORE_new();
+    //为合法证书链上下文分配内存
+    legalctx = X509_STORE_CTX_new();
     //LOG(INFO)<<"SSLParse start!"<<endl;
+    //加载加密算法函数和单向散列算法函数
+    OpenSSL_add_all_algorithms();
     cout<<"SSLParse start!"<<endl;
 }
 
@@ -315,34 +310,40 @@ SSLParse::~SSLParse() {
     //释放根证书链及上下文内存
     X509_STORE_CTX_free(ctx);
     X509_STORE_free(certChain);
+    //合法释放合法证书链内存
+    X509_STORE_CTX_free(legalctx);
+    X509_STORE_free(legalCertChain);
     //LOG(INFO)<<"SSLParse end!"<<endl;
+    //防止OpenSSL_add_all_algorithms()出现内存泄漏
+    CONF_modules_unload(1);    //for conf
+    EVP_cleanup();                 //For EVP
+    CRYPTO_cleanup_all_ex_data();  //generic
     cout<<"SSLParse end!"<<endl;
 }
 
 //根据证书结构体字符串字段解析证书详情
 void SSLParse::getSSLInfos(list<SSLInfo>& sslInfos){
-    //加载加密算法函数和单向散列算法函数
-    OpenSSL_add_all_algorithms();
     //该组证书是否有效(合法)默认非法检测出合法则为合法
     bool isLEGAL = false;
-
-    //根据与根证书对比合法的证书建立合法证书链
-    X509_STORE * legalCertChain = NULL;
-    //合法证书链上下文
-    X509_STORE_CTX *legalctx = NULL;
-    //初始化合法证书链
-    legalCertChain = X509_STORE_new();
-    //为合法证书链上下文分配内存
-    legalctx = X509_STORE_CTX_new();
-
     //循环遍历解析证书字符串数组,完成证书二进制字符串解析工作，并判断是否在根证书链中
+//    for(SSLInfo &sslInfo:sslInfos){
+//        BIO *bio_mem = BIO_new_mem_buf(sslInfo.certstring.c_str(),(int)sslInfo.certstring.length());
+//        X509 * x509 = d2i_X509_bio(bio_mem, NULL);
+//        sslInfo.x509 = x509;
+//        BIO_free(bio_mem);
+//    }
+//    for(SSLInfo &sslInfo:sslInfos){
+//        X509_free(sslInfo.x509);
+//    }
     for(SSLInfo &sslInfo:sslInfos){
         //分配BIO缓冲区
-        BIO *bio_mem = BIO_new(BIO_s_mem());
+        BIO *bio_mem = BIO_new_mem_buf(sslInfo.certstring.c_str(),(int)sslInfo.certstring.length());
+        //bio_mem = BIO_new(BIO_s_mem());
         //将证书base64内容放入BIO的缓冲区
-        BIO_puts(bio_mem,toBase64(sslInfo.certstring).c_str());
+        //BIO_puts(bio_mem,toBase64(sslInfo.certstring).c_str());
         //将BIO缓冲区的内容转换为X509对象
-        X509 * x509 = PEM_read_bio_X509(bio_mem, NULL, NULL, NULL);
+        //X509 * x509 = PEM_read_bio_X509(bio_mem, NULL, NULL, NULL);
+        X509 * x509 = d2i_X509_bio(bio_mem, NULL);
         //判断字符串是否是合法证书
         if(NULL == x509){
             sslInfo.legitimacy = "unlegal";
@@ -365,10 +366,10 @@ void SSLParse::getSSLInfos(list<SSLInfo>& sslInfos){
                 packageSSLInfoByX509(sslInfo,x509);
             }
         }
-        //释放BIO缓冲区空间
-        BIO_free(bio_mem);
         //释放X509对象空间
         X509_free(x509);
+        //释放BIO缓冲区空间
+        BIO_free(bio_mem);
     }
 
     //如果该组与根证书匹配无合法证书，则整组非法。
@@ -407,15 +408,7 @@ void SSLParse::getSSLInfos(list<SSLInfo>& sslInfos){
                 BIO_free(bio_mem);
             }
         }
-        //合法释放合法证书链内存
-        X509_STORE_CTX_free(legalctx);
-        X509_STORE_free(legalCertChain);
     }
-
-    //防止OpenSSL_add_all_algorithms()出现内存泄漏
-    CONF_modules_unload(1);    //for conf
-    EVP_cleanup();                 //For EVP
-    CRYPTO_cleanup_all_ex_data();  //generic
 }
 
 //验证证书是否在根证书链中

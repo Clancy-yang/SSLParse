@@ -53,6 +53,7 @@ typedef struct SSLInfo{
     string notBefore;       //不早于
     string notAfter;        //不晚于
     string certstring;      //证书二进制字符串
+    X509 *x509;//对应X509对象
     bool operator==(const SSLInfo &sslInfo){
         return (sslInfo.seriallNumber == seriallNumber);
     }
@@ -89,7 +90,12 @@ private:
     X509_STORE_CTX *ctx;
     //根证书所在目录
     string rootCertPath;
-    //构造函数 初始化根证书链
+    //根据与根证书对比合法的证书建立合法证书链
+    X509_STORE * legalCertChain = NULL;
+    //合法证书链上下文
+    X509_STORE_CTX *legalctx = NULL;
+
+    //构造函数 初始化证书链
     SSLParse();
     //加载根证书目录的根证书
     void loadRootCerts();

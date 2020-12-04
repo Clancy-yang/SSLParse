@@ -1,0 +1,6 @@
+/home/clancy/opt/clion-2020.2.4/bin/cmake/linux/bin/cmake -DCMAKE_BUILD_TYPE=Debug -G "CodeBlocks - Unix Makefiles" /home/clancy/projects/SSLParse_1
+CMake Error at CMakeLists.txt:2 (cmake_minimum_required):
+  CMake 3.18 or higher is required.  You are running version 3.17.3
+
+
+-- Configuring incomplete, errors occurred!
